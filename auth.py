@@ -101,3 +101,22 @@ def initialize_session_state():
         st.session_state.user = None
     if 'current_page' not in st.session_state:
         st.session_state.current_page = "dashboard"
+        def login(self, username, password):
+    # Demo credentials for testing
+    if username == "demo" and password == "demo123":
+        return {
+            'id': 1,
+            'username': 'demo',
+            'full_name': 'Demo User',
+            'role': 'admin',
+            'region': 'Demo Region'
+        }
+    
+    try:
+        query = "SELECT * FROM users WHERE username = %s AND password = %s"
+        result = self.db.execute_query(query, (username, password), fetch=True)
+        if result is not None and not result.empty:
+            return result.iloc[0].to_dict()
+        return None
+    except:
+        return None
