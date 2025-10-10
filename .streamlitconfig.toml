@@ -7,4 +7,4 @@ enableCORS = false
 serverAddress = "localhost"
 gatherUsageStats = false
 # .streamlit/secrets.toml
-DATABASE_URL = "postgresql://username:password@host:port/database"
+DATABASE_URL = "postgresql://postgres:Urji@2030@host:port/database"
