@@ -6,3 +6,5 @@ enableCORS = false
 [browser]
 serverAddress = "localhost"
 gatherUsageStats = false
+# .streamlit/secrets.toml
+DATABASE_URL = "postgresql://username:password@host:port/database"
