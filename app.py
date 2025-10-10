@@ -1,13 +1,28 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from auth import Authenticator, initialize_session_state
-from database import Database, get_trainings, get_users_by_role, add_training, update_user
-from certificate_generator import CertificateGenerator, generate_certificate_id
 import io
-from location_data import location_data
+
+# Safe imports with error handling
+try:
+    from auth import Authenticator, initialize_session_state
+    from database import Database, get_trainings, get_users_by_role, add_training, update_user
+    from certificate_generator import CertificateGenerator, generate_certificate_id
+    from location_data import location_data
+    
+    # Initialize components
+    initialize_session_state()
+    auth = Authenticator()
+    cert_gen = CertificateGenerator()
+    
+except ImportError as e:
+    st.error(f"Import Error: {e}")
+    st.info("Please check that all required files are present and don't have circular imports.")
+    st.stop()
+except Exception as e:
+    st.error(f"Initialization Error: {e}")
+    st.stop()
 
 # Page configuration
 st.set_page_config(
