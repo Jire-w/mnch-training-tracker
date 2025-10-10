@@ -4,7 +4,17 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import io
 
-# Safe imports with error handling
+# Set page config first
+st.set_page_config(
+    page_title="MNCH Training Tracker",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Demo data for when database is not available
+DEMO_MODE = False
+
 try:
     from auth import Authenticator, initialize_session_state
     from database import Database, get_trainings, get_users_by_role, add_training, update_user
@@ -14,16 +24,23 @@ try:
     # Initialize components
     initialize_session_state()
     auth = Authenticator()
-    cert_gen = CertificateGenerator()
     
+    # Test database connection
+    db = Database()
+    if db.conn is None:
+        DEMO_MODE = True
+        st.warning("🔧 Demo Mode: Running without database connection")
+    else:
+        cert_gen = CertificateGenerator()
+        
 except ImportError as e:
+    DEMO_MODE = True
     st.error(f"Import Error: {e}")
-    st.info("Please check that all required files are present and don't have circular imports.")
-    st.stop()
-except Exception as e:
-    st.error(f"Initialization Error: {e}")
-    st.stop()
+    st.info("Running in demo mode. Some features will be limited.")
 
+except Exception as e:
+    DEMO_MODE = True
+    st.warning(f"🔧 Demo Mode: {e}")
 # Page configuration
 st.set_page_config(
     page_title="MNCH Training Tracker",
