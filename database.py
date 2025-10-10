@@ -1,11 +1,31 @@
-import psycopg2
+iimport psycopg2
 import pandas as pd
 import streamlit as st
+import os
 
 class Database:
     def __init__(self):
         self.conn = None
         self.connect()
+    
+    def connect(self):
+        try:
+            # Try to get from Streamlit secrets first, then environment variables
+            db_config = {
+                'host': st.secrets.get('DB_HOST', os.getenv('DB_HOST', 'localhost')),
+                'database': st.secrets.get('DB_NAME', os.getenv('DB_NAME', 'mnch_training_tracker')),
+                'user': st.secrets.get('DB_USER', os.getenv('DB_USER', 'postgres')),
+                'password': st.secrets.get('DB_PASSWORD', os.getenv('DB_PASSWORD', '')),
+                'port': st.secrets.get('DB_PORT', os.getenv('DB_PORT', '5432'))
+            }
+            
+            self.conn = psycopg2.connect(**db_config)
+            return True
+        except Exception as e:
+            st.error(f"Database connection failed: {e}")
+            return False
+    
+    # ... rest of your database code remains the same
     
     def connect(self):
         try:
