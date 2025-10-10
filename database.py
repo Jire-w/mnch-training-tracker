@@ -8,37 +8,85 @@ class Database:
         self.conn = None
         self.connect()
     
+    def get_connection_config(self):
+        """Get database connection configuration from Streamlit secrets or environment variables"""
+        try:
+            # Try Streamlit secrets first (for cloud deployment)
+            if hasattr(st, 'secrets'):
+                # Check for different secret formats
+                if 'postgres' in st.secrets:
+                    # Format 1: Using [postgres] section
+                    return {
+                        'host': st.secrets.postgres.host,
+                        'database': st.secrets.postgres.database,
+                        'user': st.secrets.postgres.user,
+                        'password': st.secrets.postgres.password,
+                        'port': st.secrets.postgres.port
+                    }
+                elif 'DATABASE_URL' in st.secrets:
+                    # Format 2: Using DATABASE_URL
+                    return self._parse_database_url(st.secrets.DATABASE_URL)
+                else:
+                    # Format 3: Individual secrets
+                    return {
+                        'host': st.secrets.get('DB_HOST', 'localhost'),
+                        'database': st.secrets.get('DB_NAME', 'mnch_training_tracker'),
+                        'user': st.secrets.get('DB_USER', 'postgres'),
+                        'password': st.secrets.get('DB_PASSWORD', ''),
+                        'port': st.secrets.get('DB_PORT', '5432')
+                    }
+            else:
+                # Local development - use environment variables
+                return {
+                    'host': os.getenv('DB_HOST', 'localhost'),
+                    'database': os.getenv('DB_NAME', 'mnch_training_tracker'),
+                    'user': os.getenv('DB_USER', 'postgres'),
+                    'password': os.getenv('DB_PASSWORD', ''),
+                    'port': os.getenv('DB_PORT', '5432')
+                }
+        except Exception as e:
+            st.error(f"Error getting database configuration: {e}")
+            return None
+    
+    def _parse_database_url(self, database_url):
+        """Parse DATABASE_URL format (common in cloud providers)"""
+        try:
+            # Remove postgres:// prefix if present
+            if database_url.startswith('postgres://'):
+                database_url = database_url.replace('postgres://', 'postgresql://')
+            
+            # Parse the URL
+            from urllib.parse import urlparse
+            result = urlparse(database_url)
+            
+            return {
+                'host': result.hostname,
+                'database': result.path[1:],  # Remove leading slash
+                'user': result.username,
+                'password': result.password,
+                'port': result.port or 5432
+            }
+        except Exception as e:
+            st.error(f"Error parsing DATABASE_URL: {e}")
+            return None
+    
     def connect(self):
         try:
-            # Try to get from Streamlit secrets first, then environment variables
-            db_config = {
-                'host': st.secrets.get('DB_HOST', os.getenv('DB_HOST', 'localhost')),
-                'database': st.secrets.get('DB_NAME', os.getenv('DB_NAME', 'mnch_training_tracker')),
-                'user': st.secrets.get('DB_USER', os.getenv('DB_USER', 'postgres')),
-                'password': st.secrets.get('DB_PASSWORD', os.getenv('DB_PASSWORD', '')),
-                'port': st.secrets.get('DB_PORT', os.getenv('DB_PORT', '5432'))
-            }
+            db_config = self.get_connection_config()
+            if not db_config:
+                st.error("Could not get database configuration")
+                return False
             
             self.conn = psycopg2.connect(**db_config)
             return True
         except Exception as e:
             st.error(f"Database connection failed: {e}")
-            return False
-    
-    # ... rest of your database code remains the same
-    
-    def connect(self):
-        try:
-            self.conn = psycopg2.connect(
-                host='localhost',
-                database='mnch_training_tracker',
-                user='postgres',
-                password='MnchTraining2024!',
-                port='5432'
-            )
-            return True
-        except Exception as e:
-            st.error(f"Database connection failed: {e}")
+            st.info("""
+            **To fix this:**
+            1. Set up a cloud database (ElephantSQL, Render, or Supabase)
+            2. Add your database credentials to Streamlit Cloud secrets
+            3. Run create_all_tables.py to create the database tables
+            """)
             return False
     
     def execute_query(self, query, params=None, fetch=False):
@@ -52,12 +100,10 @@ class Database:
             
             if fetch:
                 if query.strip().upper().startswith('SELECT'):
-                    # For SELECT queries, return DataFrame
                     result = cursor.fetchall()
                     columns = [desc[0] for desc in cursor.description]
                     return pd.DataFrame(result, columns=columns)
                 else:
-                    # For INSERT...RETURNING, UPDATE, etc., return the raw result
                     result = cursor.fetchone()
                     return result
             else:
@@ -66,7 +112,6 @@ class Database:
                 
         except Exception as e:
             st.error(f"Query execution error: {e}")
-            self.conn.rollback()  # Important: rollback on error
             return None
         finally:
             if 'cursor' in locals():
@@ -78,120 +123,52 @@ class Database:
 
 # Utility functions
 def get_trainings():
-    """Get all trainings from the database"""
-    try:
-        db = Database()
-        query = """
-        SELECT id, title, training_type, start_date, end_date, venue, duration, description, created_at
-        FROM trainings 
-        ORDER BY start_date DESC
-        """
-        result = db.execute_query(query, fetch=True)
-        return result
-    except Exception as e:
-        st.error(f"Error getting trainings: {e}")
-        return None
-
-def get_participants(training_id):
-    """Get participants for a specific training"""
-    try:
-        db = Database()
-        query = """
-        SELECT u.*, tp.attendance_status, tp.certificate_issued
-        FROM training_participants tp
-        JOIN users u ON tp.user_id = u.id
-        WHERE tp.training_id = %s
-        """
-        return db.execute_query(query, (training_id,), fetch=True)
-    except Exception as e:
-        st.error(f"Error getting participants: {e}")
-        return None
-
-def add_training(title, training_type, start_date, end_date, venue, duration, description=None):
-    """Add a new training to the database"""
-    try:
-        db = Database()
-        
-        # Convert dates to string format for SQL
-        start_date_str = start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date)
-        end_date_str = end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date)
-        
-        query = """
-            INSERT INTO trainings (title, training_type, start_date, end_date, venue, duration, description)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-        """
-        
-        result = db.execute_query(
-            query, 
-            (title, training_type, start_date_str, end_date_str, venue, duration, description),
-            fetch=True
-        )
-        
-        # Handle the result which is a tuple (id,) from RETURNING clause
-        if result is not None and isinstance(result, tuple) and len(result) > 0:
-            return result[0]  # Return the ID
-        return False
-        
-    except Exception as e:
-        st.error(f"Error adding training: {e}")
-        return False
+    db = Database()
+    query = """
+    SELECT id, title, training_type, start_date, end_date, venue, duration, description, created_at
+    FROM trainings 
+    ORDER BY start_date DESC
+    """
+    return db.execute_query(query, fetch=True)
 
 def get_users_by_role(role=None):
-    """Get users by role"""
-    try:
-        db = Database()
-        if role:
-            query = "SELECT * FROM users WHERE role = %s ORDER BY full_name"
-            return db.execute_query(query, (role,), fetch=True)
-        else:
-            query = "SELECT * FROM users ORDER BY full_name"
-            return db.execute_query(query, fetch=True)
-    except Exception as e:
-        st.error(f"Error getting users by role: {e}")
-        return None
+    db = Database()
+    if role:
+        query = "SELECT * FROM users WHERE role = %s ORDER BY full_name"
+        return db.execute_query(query, (role,), fetch=True)
+    else:
+        query = "SELECT * FROM users ORDER BY full_name"
+        return db.execute_query(query, fetch=True)
 
-def add_training_participant(training_id, user_id):
-    """Add a participant to a training"""
-    try:
-        db = Database()
-        query = """
-        INSERT INTO training_participants (training_id, user_id)
-        VALUES (%s, %s)
-        ON CONFLICT (training_id, user_id) DO NOTHING
-        """
-        return db.execute_query(query, (training_id, user_id))
-    except Exception as e:
-        st.error(f"Error adding training participant: {e}")
-        return False
-
-def get_training_by_id(training_id):
-    """Get a specific training by ID"""
-    try:
-        db = Database()
-        query = """
-        SELECT id, title, training_type, start_date, end_date, venue, duration, description, created_at
-        FROM trainings 
-        WHERE id = %s
-        """
-        result = db.execute_query(query, (training_id,), fetch=True)
-        if result is not None and not result.empty:
-            return result.iloc[0]
-        return None
-    except Exception as e:
-        st.error(f"Error getting training by ID: {e}")
-        return None
+def add_training(title, training_type, start_date, end_date, venue, duration, description=None):
+    db = Database()
+    
+    # Convert dates to string format for SQL
+    start_date_str = start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date)
+    end_date_str = end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date)
+    
+    query = """
+        INSERT INTO trainings (title, training_type, start_date, end_date, venue, duration, description)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+    """
+    
+    result = db.execute_query(
+        query, 
+        (title, training_type, start_date_str, end_date_str, venue, duration, description),
+        fetch=True
+    )
+    
+    # Handle the result which is a tuple (id,) from RETURNING clause
+    if result is not None and isinstance(result, tuple) and len(result) > 0:
+        return result[0]  # Return the ID
+    return False
 
 def update_user(user_id, update_data):
-    """Update user information"""
-    try:
-        db = Database()
-        set_clause = ", ".join([f"{key} = %s" for key in update_data.keys()])
-        values = list(update_data.values())
-        values.append(user_id)
-        
-        query = f"UPDATE users SET {set_clause} WHERE id = %s"
-        return db.execute_query(query, values)
-    except Exception as e:
-        st.error(f"Error updating user: {e}")
-        return False
+    db = Database()
+    set_clause = ", ".join([f"{key} = %s" for key in update_data.keys()])
+    values = list(update_data.values())
+    values.append(user_id)
+    
+    query = f"UPDATE users SET {set_clause} WHERE id = %s"
+    return db.execute_query(query, values)
