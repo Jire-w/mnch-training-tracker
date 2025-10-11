@@ -3,5 +3,5 @@
 host = "localhost"
 database = "mnch_training_tracker"
 user = "postgres"
-password = "Urji@2030"  # The password that worked
+password = "Urji@2030"  # This was the password that worked
 port = 5432
