@@ -1,10 +1,7 @@
-[server]
-headless = true
-port = 8501
-enableCORS = false
-
-[browser]
-serverAddress = "localhost"
-gatherUsageStats = false
 # .streamlit/secrets.toml
-DATABASE_URL = "postgresql://postgres:Urji@2030@host:port/database"
+[postgres]
+host = "localhost"
+database = "mnch_training_tracker"
+user = "postgres"
+password = "Urji@2030"  # The password that worked
+port = 5432
