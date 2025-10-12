@@ -2,252 +2,175 @@ import psycopg2
 import pandas as pd
 import streamlit as st
 import os
-import time
+import urllib.parse
 from contextlib import contextmanager
-from urllib.parse import urlparse
 
 class Database:
     def __init__(self):
         self.conn = None
     
     def get_connection_config(self):
-        """Get database connection configuration with smart fallbacks"""
-        # Try different configuration sources in order
-        config_sources = [
-            self._get_config_from_env_file,
-            self._get_config_from_streamlit_secrets,
-            self._get_config_from_env_vars,
-            self._get_config_from_common_passwords
-        ]
-        
-        for config_source in config_sources:
-            try:
-                config = config_source()
-                if config and self._test_connection(config):
-                    return config
-            except Exception:
-                continue
-        
-        st.error("❌ Could not find valid database configuration")
-        return None
-    
-    def _get_config_from_env_file(self):
-        """Try to load from .env file in project root"""
+        """Get database connection configuration for cloud deployment"""
         try:
-            from dotenv import load_dotenv
-            load_dotenv()  # This loads from .env file in current directory
-            
-            password = os.getenv('DB_PASSWORD')
-            if password:
-                return {
-                    'host': os.getenv('DB_HOST', 'localhost'),
-                    'database': os.getenv('DB_NAME', 'mnch_training_tracker'),
-                    'user': os.getenv('DB_USER', 'postgres'),
-                    'password': password,
-                    'port': int(os.getenv('DB_PORT', 5432))
-                }
-        except ImportError:
-            st.warning("python-dotenv not installed. Run: pip install python-dotenv")
-        except Exception:
-            pass
-        return None
-    
-    def _get_config_from_streamlit_secrets(self):
-        """Get config from Streamlit secrets"""
-        try:
+            # Try Streamlit secrets first (for cloud deployment)
             if hasattr(st, 'secrets'):
-                # Try different secret formats
+                # Check for different secret formats
                 if 'postgres' in st.secrets:
                     config = {
-                        'host': st.secrets.postgres.get('host', 'localhost'),
-                        'database': st.secrets.postgres.get('database', 'mnch_training_tracker'),
-                        'user': st.secrets.postgres.get('user', 'postgres'),
+                        'host': st.secrets.postgres.get('host', ''),
+                        'database': st.secrets.postgres.get('database', ''),
+                        'user': st.secrets.postgres.get('user', ''),
                         'password': st.secrets.postgres.get('password', ''),
                         'port': st.secrets.postgres.get('port', 5432)
                     }
-                    if config['password']:  # Only return if password exists
+                    # Validate that we have the essential connection details
+                    if config['host'] and config['database'] and config['user']:
+                        st.success("✅ Using cloud database configuration")
                         return config
+                
+                # Check for DATABASE_URL (common in cloud platforms)
                 elif 'DATABASE_URL' in st.secrets:
                     return self._parse_database_url(st.secrets.DATABASE_URL)
-        except Exception:
-            pass
-        return None
-    
-    def _get_config_from_env_vars(self):
-        """Get config from environment variables"""
-        try:
-            password = os.getenv('DB_PASSWORD')
-            if password:
-                return {
-                    'host': os.getenv('DB_HOST', 'localhost'),
-                    'database': os.getenv('DB_NAME', 'mnch_training_tracker'),
-                    'user': os.getenv('DB_USER', 'postgres'),
-                    'password': password,
-                    'port': int(os.getenv('DB_PORT', 5432))
-                }
-        except Exception:
-            pass
-        return None
-    
-    def _get_config_from_common_passwords(self):
-        """Try common PostgreSQL passwords as last resort"""
-        common_passwords = [
-            "new_password",      # The password you recently set
-            "password",          # Most common default
-            "postgres",          # Second most common
-            "",                  # Empty password
-            "admin",             # Third common
-            "123456",            # Simple password
-            "MnchTraining2024!"  # Your old password
-        ]
-        
-        base_config = {
-            'host': 'localhost',
-            'database': 'mnch_training_tracker',
-            'user': 'postgres',
-            'port': 5432
-        }
-        
-        for password in common_passwords:
-            test_config = base_config.copy()
-            test_config['password'] = password
-            if self._test_connection(test_config):
-                st.info(f"🔑 Connected using password: '{password}'")
-                return test_config
-        
-        return None
-    
-    def _test_connection(self, config, timeout=3):
-        """Test if a connection configuration works"""
-        try:
-            conn = psycopg2.connect(**config, connect_timeout=timeout)
-            conn.close()
-            return True
-        except Exception:
-            return False
+                
+                # Check for individual environment variables
+                else:
+                    config = {
+                        'host': st.secrets.get('DB_HOST', ''),
+                        'database': st.secrets.get('DB_NAME', ''),
+                        'user': st.secrets.get('DB_USER', ''),
+                        'password': st.secrets.get('DB_PASSWORD', ''),
+                        'port': st.secrets.get('DB_PORT', 5432)
+                    }
+                    if config['host'] and config['database'] and config['user']:
+                        return config
+            
+            # Fallback to environment variables (for local development)
+            config = {
+                'host': os.getenv('DB_HOST', 'localhost'),
+                'database': os.getenv('DB_NAME', 'mnch_training_tracker'),
+                'user': os.getenv('DB_USER', 'postgres'),
+                'password': os.getenv('DB_PASSWORD', ''),
+                'port': int(os.getenv('DB_PORT', 5432))
+            }
+            
+            # If we have a cloud database URL, use it
+            database_url = os.getenv('DATABASE_URL')
+            if database_url:
+                return self._parse_database_url(database_url)
+                
+            return config
+            
+        except Exception as e:
+            st.error(f"Error getting database configuration: {e}")
+            return None
     
     def _parse_database_url(self, database_url):
-        """Parse DATABASE_URL format"""
+        """Parse DATABASE_URL format (common in cloud providers)"""
         try:
+            # Handle both postgres:// and postgresql://
             if database_url.startswith('postgres://'):
                 database_url = database_url.replace('postgres://', 'postgresql://')
             
-            result = urlparse(database_url)
+            # Parse the URL
+            result = urllib.parse.urlparse(database_url)
+            
             return {
                 'host': result.hostname,
-                'database': result.path[1:],
+                'database': result.path[1:],  # Remove leading slash
                 'user': result.username,
                 'password': result.password,
                 'port': result.port or 5432
             }
-        except Exception:
+        except Exception as e:
+            st.error(f"Error parsing DATABASE_URL: {e}")
             return None
     
     def connect(self):
-        """Connect to database"""
+        """Connect to database with detailed error reporting"""
         try:
             db_config = self.get_connection_config()
             if not db_config:
-                self._show_connection_help()
+                st.error("""
+                ❌ Database configuration not found!
+                
+                For local development, create a `.env` file with:
+                ```
+                DB_HOST=localhost
+                DB_NAME=mnch_training_tracker
+                DB_USER=postgres
+                DB_PASSWORD=your_password
+                DB_PORT=5432
+                ```
+                
+                For cloud deployment, add your database credentials to Streamlit Cloud secrets.
+                """)
                 return False
             
+            # Test connection
             self.conn = psycopg2.connect(**db_config)
+            st.success("✅ Connected to database successfully!")
             return True
-                
+            
+        except psycopg2.OperationalError as e:
+            st.error(f"❌ Database connection failed: {e}")
+            st.info("""
+            **To fix this:**
+            
+            1. **For Cloud Deployment:**
+               - Set up a cloud database (Supabase, ElephantSQL, or Render)
+               - Add your database credentials to Streamlit Cloud secrets
+               
+            2. **For Local Development:**
+               - Make sure PostgreSQL is running
+               - Check your connection settings in the .env file
+               
+            **Recommended Cloud Databases (Free Tier):**
+            - Supabase (https://supabase.com)
+            - ElephantSQL (https://elephantsql.com)
+            - Render (https://render.com)
+            """)
+            return False
         except Exception as e:
-            st.error(f"Database connection failed: {e}")
-            self._show_connection_help()
+            st.error(f"❌ Unexpected error: {e}")
             return False
-    
-    def _show_connection_help(self):
-        """Show helpful connection troubleshooting information"""
-        st.error("""
-        **Database Connection Troubleshooting:**
-        
-        1. **Create a .env file in your project root with:**
-        ```
-        DB_HOST=localhost
-        DB_NAME=mnch_training_tracker  
-        DB_USER=postgres
-        DB_PASSWORD=new_password
-        DB_PORT=5432
-        ```
-        
-        2. **Or create .streamlit/secrets.toml with:**
-        ```toml
-        [postgres]
-        host = "localhost"
-        database = "mnch_training_tracker"
-        user = "postgres" 
-        password = "new_password"
-        port = 5432
-        ```
-        
-        3. **Install required package:**
-        ```bash
-        pip install python-dotenv
-        ```
-        """)
-    
-    def is_connected(self):
-        """Check if connection is active and valid"""
-        try:
-            if self.conn and not self.conn.closed:
-                cursor = self.conn.cursor()
-                cursor.execute("SELECT 1")
-                cursor.close()
-                return True
-            return False
-        except Exception:
-            return False
-    
-    @contextmanager
-    def get_cursor(self):
-        """Context manager for database cursor"""
-        if not self.is_connected():
-            if not self.connect():
-                raise Exception("Failed to establish database connection")
-        
-        cursor = self.conn.cursor()
-        try:
-            yield cursor
-            self.conn.commit()
-        except Exception as e:
-            self.conn.rollback()
-            raise e
-        finally:
-            cursor.close()
     
     def execute_query(self, query, params=None, fetch=False):
-        """Execute query with comprehensive error handling"""
+        """Execute query with error handling"""
         try:
-            with self.get_cursor() as cursor:
-                cursor.execute(query, params or ())
-                
-                if fetch:
-                    if query.strip().upper().startswith('SELECT'):
-                        columns = [desc[0] for desc in cursor.description]
-                        data = cursor.fetchall()
-                        if data:
-                            return pd.DataFrame(data, columns=columns)
-                        else:
-                            return pd.DataFrame(columns=columns)
-                    else:
-                        result = cursor.fetchone()
-                        return result
+            if self.conn is None or self.conn.closed:
+                if not self.connect():
+                    return None
+            
+            cursor = self.conn.cursor()
+            cursor.execute(query, params or ())
+            
+            if fetch:
+                if query.strip().upper().startswith('SELECT'):
+                    result = cursor.fetchall()
+                    columns = [desc[0] for desc in cursor.description]
+                    return pd.DataFrame(result, columns=columns)
                 else:
-                    return True
-                    
+                    result = cursor.fetchone()
+                    return result
+            else:
+                self.conn.commit()
+                return True
+                
         except Exception as e:
-            st.error(f"Database error: {e}")
+            st.error(f"Query execution error: {e}")
+            if self.conn:
+                self.conn.rollback()
             return None
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
     
     def close(self):
         """Close database connection"""
-        if self.conn and not self.conn.closed:
+        if self.conn:
             self.conn.close()
 
-# Utility functions
+# Utility functions with better error handling
 def get_trainings():
     """Get all trainings from the database"""
     try:
@@ -319,22 +242,3 @@ def update_user(user_id, update_data):
     except Exception as e:
         st.error(f"Error updating user: {e}")
         return False
-
-# Test function
-def test_connection():
-    """Test database connection"""
-    try:
-        db = Database()
-        result = db.execute_query("SELECT version()", fetch=True)
-        if result is not None:
-            st.success("✅ Database connection successful!")
-            return True
-        else:
-            st.error("❌ Database connection failed")
-            return False
-    except Exception as e:
-        st.error(f"❌ Connection test failed: {e}")
-        return False
-
-if __name__ == "__main__":
-    test_connection()
