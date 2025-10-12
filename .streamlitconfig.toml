@@ -1,7 +1,6 @@
-# .streamlit/secrets.toml
 [postgres]
 host = "localhost"
 database = "mnch_training_tracker"
 user = "postgres"
-password = "Urji@2030"  # This was the password that worked
+password = "new_password"
 port = 5432
